@@ -1,4 +1,4 @@
-# Blender Agent (MCP)
+# Blender Agent
 
 A simple, pure-Python AI agent that generates 3D Procedural Materials in Blender. 
 It uses the Model Context Protocol (MCP) to communicate with a headless Blender instance, allowing you to create materials using natural language.
