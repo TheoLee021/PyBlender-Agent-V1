@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+env/
+venv/
+
+# Environment variables
+.env
+
+# MacOS
+.DS_Store
+
+# Blender
+*.blend
+*.blend@
+output/
