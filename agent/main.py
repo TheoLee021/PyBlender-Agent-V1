@@ -119,7 +119,7 @@ tools_def = [
                 },
                 "python_code": {
                     "type": "STRING",
-                    "description": "Create a blender material from user input using Blender 4.5's Python API with BlenderMCP. Do not use image node or embed image."
+                    "description": "Create a blender material from user input using Blender 4.5's Python API with BlenderMCP. Do not use image node or embed image. IMPORTANT: 1. 'ShaderNodeTexMusgrave' is removed in 4.5; use 'ShaderNodeTexNoise' instead. 2. For Principled BSDF, use 'Specular IOR Level' instead of 'Specular'."
                 }
             },
             "required": ["name", "python_code"]
@@ -206,12 +206,17 @@ def main():
             if response_text:
                 print(f"Agent: {response_text}")
 
-            if func_call:
+            # Limit loop count to prevent infinite loops
+            loop_count = 0
+            MAX_LOOPS = 10
+            
+            while func_call and loop_count < MAX_LOOPS:
+                loop_count += 1
                 fname = func_call["name"]
                 fargs = func_call["args"]
                 call_id = func_call.get("id")
                 
-                print(f"Agent calling tool: {fname}(...)")
+                print(f"Agent calling tool: {fname}(...)({loop_count}/{MAX_LOOPS})")
                 
                 # Execute tool via MCP
                 spinner_tool = Spinner(f"Running tool {fname}...")
@@ -227,12 +232,16 @@ def main():
                 spinner_res = Spinner("Analyzing result...")
                 spinner_res.start()
                 try:
-                    response_text = llm.send_tool_result(fname, result, tool_call_id=call_id)
+                    # Reformatted to receive tuple (text, func_call)
+                    response_text, func_call = llm.send_tool_result(fname, result, tool_call_id=call_id)
                 finally:
                     spinner_res.stop()
                 
                 if response_text:
                     print(f"Agent: {response_text}")
+            
+            if loop_count >= MAX_LOOPS:
+                print("Warning: Maximum tool loop limit reached.")
             
     except Exception as e:
         print(f"\nError: {e}")

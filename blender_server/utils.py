@@ -12,6 +12,23 @@ def create_procedural_material(name: str, python_code: str):
     try:
         # We wrap the code to ensure it runs
         exec(python_code, globals(), local_vars)
+
+        # Auto-Assign to Preview Object
+        preview_name = "PreviewSphere"
+        obj = bpy.data.objects.get(preview_name)
+        if not obj:
+            bpy.ops.mesh.primitive_uv_sphere_add(radius=1.0, location=(0, 0, 0))
+            obj = bpy.context.active_object
+            obj.name = preview_name
+            bpy.ops.object.shade_smooth()
+        
+        # Find the material (assuming the script created it with the given name)
+        mat = bpy.data.materials.get(name)
+        if mat:
+            if not obj.data.materials:
+                obj.data.materials.append(mat)
+            else:
+                obj.data.materials[0] = mat
         
         # Prepare output directory
         output_dir = "output"

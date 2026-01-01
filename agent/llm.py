@@ -171,7 +171,7 @@ class LLMClient:
                 except:
                     pass
             
-            return text_response
+            return text_response, fc
 
         elif self.provider == "openai":
             # Add tool result to history
@@ -190,6 +190,20 @@ class LLMClient:
             )
             
             msg = completion.choices[0].message
+            # Add assistant message to history
             self.history.append(msg)
             
-            return msg.content
+            text_response = msg.content or ""
+            fc = None
+            
+            if msg.tool_calls:
+                # OpenAI can return multiple calls, but to keep it simple and consistent with our loop,
+                # we'll pick the first one.
+                t = msg.tool_calls[0]
+                fc = {
+                    "name": t.function.name,
+                    "args": json.loads(t.function.arguments),
+                    "id": t.id 
+                }
+            
+            return text_response, fc
