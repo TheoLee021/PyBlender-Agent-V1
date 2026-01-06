@@ -46,7 +46,7 @@ It uses the Model Context Protocol (MCP) to communicate with a headless Blender 
 
 Run the agent:
 ```bash
-uv run agent/main.py
+uv run main.py
 ```
 
 1. The agent will launch Blender in the background (headless).
@@ -63,8 +63,8 @@ Agent: I have created the brushed aluminum material for you! It's saved in the o
 
 ## Project Structure
 
-- `agent/`: The "Client" side.
-  - `main.py`: Entry point. Manages the MCP connection and REPL loop.
+- `main.py`: Entry point. Manages the MCP connection and REPL loop.
+- `agent/`: The "Client" side modules.
   - `llm.py`: unified generic wrapper for Gemini/OpenAI.
 - `blender_server/`: The "Server" side (runs inside Blender).
   - `server.py`: MCP Server implementation (JSON-RPC loop).

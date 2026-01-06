@@ -21,3 +21,6 @@ venv/
 *.blend
 *.blend@
 output/
+
+# Chromadb
+chroma_db/
