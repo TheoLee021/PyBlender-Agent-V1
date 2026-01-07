@@ -8,6 +8,7 @@ import itertools
 
 from dotenv import load_dotenv
 from agent.llm import LLMClient
+from agent.rag import RAGClient
 
 # Load environment variables
 load_dotenv(override=True)
@@ -118,7 +119,7 @@ tools_def = [
                 },
                 "python_code": {
                     "type": "STRING",
-                    "description": "Create a blender material from user input using Blender 4.5's Python API with BlenderMCP. Do not use image node or embed image. IMPORTANT: 1. 'ShaderNodeTexMusgrave' is removed in 4.5; use 'ShaderNodeTexNoise' instead. 2. For Principled BSDF, use 'Specular IOR Level' instead of 'Specular'."
+                    "description": "Create a blender procedural material from user input using Blender 4.5's Python API with BlenderMCP. Do not use image node or embed image."
                 }
             },
             "required": ["name", "python_code"]
@@ -174,6 +175,40 @@ class Spinner:
         sys.stdout.write("\r" + " " * (len(self.message) + 2) + "\r")
         sys.stdout.flush()
 
+import datetime
+
+class GenerationLogger:
+    def __init__(self):
+        self.logs = []
+        self.material_name = None
+
+    def log(self, message, end="\n"):
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        # Print to terminal
+        print(message, end=end)
+        # Store log (sanitize slightly if needed, but keeping raw is ok)
+        self.logs.append(f"[{timestamp}] {message}")
+
+    def set_material_name(self, name):
+        self.material_name = name
+
+    def save(self):
+        # Determine filename
+        if self.material_name:
+            safe_name = "".join([c if c.isalnum() else "_" for c in self.material_name])
+            filename = f"output/{safe_name}_Log.md"
+        else:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"output/Generation_Log_{timestamp}.md"
+            
+        os.makedirs("output", exist_ok=True)
+        
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write("# Generation Log\n\n")
+            f.write("\n".join(self.logs))
+        
+        print(f"\n[Logger] Log saved to {filename}")
+
 def main():
     client = BlenderMCPClient(BLENDER_PATH)
     try:
@@ -181,6 +216,9 @@ def main():
         
         print(f"Initializing LLM Provider: {LLM_PROVIDER}")
         llm = LLMClient(provider=LLM_PROVIDER, tools=tools_def)
+        
+        print("Initializing RAG Client...")
+        rag = RAGClient(persist_path="chroma_db")
         
         print(f"\nAgent is ready! (LLM Model: {llm.model_name})")
         print("Example: 'Create a shiny red metallic material'")
@@ -190,17 +228,69 @@ def main():
             user_input = input("\nYou('quit' to exit): ")
             if user_input.lower() in ["quit", "exit"]:
                 break
-                
+            
+            logger = GenerationLogger()
+            logger.log(f"User Query: {user_input}")
+
             spinner = Spinner("Agent is thinking...")
             spinner.start()
+            
+            context = "" # Keep for legacy/fallback
+            final_context = "" 
+            plan = []
+            augmented_message = ""
+            
             try:
-                response_text, func_call = llm.send_message(user_input)
+                # 1. Planner Phase
+                logger.log("\n[Planner] Generating execution plan...")
+                plan = llm.generate_plan(user_input)
+                logger.log(f"[Planner] Plan: {json.dumps(plan, indent=2)}")
+                
+                # 2. Context Aggregation
+                aggregated_context = set()
+                logger.log("\n[RAG] Aggregating context from subtasks...")
+                for task in plan:
+                    # Query for each subtask
+                    chunk = rag.query(task, n_results=2) # Fetch fewer results per task to avoid context overflow
+                    if chunk:
+                         aggregated_context.add(chunk)
+                
+                final_context = "\n---\n".join(list(aggregated_context))
+                
+                # Debug print for user visibility
+                if final_context:
+                    logger.log("\n[RAG] Final Aggregated Context:")
+                    logger.log("-" * 40)
+                    logger.log(final_context[:500] + "... (truncated)" if len(final_context) > 500 else final_context)
+                    logger.log("-" * 40 + "\n")
+                else:
+                    logger.log("\n[RAG] No relevant context found.\n")
+
+                # 3. Construct augmented message
+                augmented_message = (
+                    f"Plan of Action:\n" + "\n".join([f"{i+1}. {step}" for i, step in enumerate(plan)]) + "\n\n"
+                    f"Using the following context from Blender documentation:\n"
+                    f"{final_context}\n\n"
+                    f"User Query: {user_input}"
+                )
+                
+                # Debug print for augmented prompt
+                logger.log("\n[RAG] Augmented Prompt:")
+                logger.log("-" * 40)
+                logger.log(augmented_message)
+                logger.log("-" * 40 + "\n")
+                
+                response_text, func_call = llm.send_message(augmented_message)
+
+            except Exception as e:
+                logger.log(f"\nError: {str(e)}")
+                raise e # Re-raise to be caught by outer loop or crash if critical
             finally:
                 spinner.stop()
             
             # Print initial thought if any
             if response_text:
-                print(f"Agent: {response_text}")
+                logger.log(f"Agent: {response_text}")
 
             # Limit loop count to prevent infinite loops
             loop_count = 0
@@ -212,32 +302,45 @@ def main():
                 fargs = func_call["args"]
                 call_id = func_call.get("id")
                 
-                print(f"Agent calling tool: {fname}(...)({loop_count}/{MAX_LOOPS})")
+                # Capture material name for logging
+                if fname == "create_procedural_material" and "name" in fargs:
+                    logger.set_material_name(fargs["name"])
+
+                logger.log(f"Agent calling tool: {fname}(...)({loop_count}/{MAX_LOOPS})")
                 
                 # Execute tool via MCP
                 spinner_tool = Spinner(f"Running tool {fname}...")
                 spinner_tool.start()
+                tool_result = ""
                 try:
-                    result = client.call_tool(fname, fargs)
+                    tool_result = client.call_tool(fname, fargs)
+                except Exception as e:
+                    tool_result = f"Error executing tool: {e}"
                 finally:
                     spinner_tool.stop()
                     
-                print(f"Tool Output: {result}")
+                logger.log(f"Tool Output: {tool_result}")
                 
                 # Feed result back to LLM
                 spinner_res = Spinner("Analyzing result...")
                 spinner_res.start()
                 try:
                     # Reformatted to receive tuple (text, func_call)
-                    response_text, func_call = llm.send_tool_result(fname, result, tool_call_id=call_id)
+                    response_text, func_call = llm.send_tool_result(fname, tool_result, tool_call_id=call_id)
+                except Exception as e:
+                    logger.log(f"LLM Tool Result Error: {e}")
+                    raise e
                 finally:
                     spinner_res.stop()
                 
                 if response_text:
-                    print(f"Agent: {response_text}")
+                    logger.log(f"Agent: {response_text}")
             
             if loop_count >= MAX_LOOPS:
-                print("Warning: Maximum tool loop limit reached.")
+                logger.log("Warning: Maximum tool loop limit reached.")
+            
+            # Save log at the end of the turn
+            logger.save()
             
     except Exception as e:
         print(f"\nError: {e}")

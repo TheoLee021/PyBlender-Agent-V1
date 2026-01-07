@@ -128,6 +128,44 @@ class LLMClient:
                 
             return text_response, fc
 
+    def generate_plan(self, user_input):
+        """
+        Generates a list of search queries/subtasks from the user input.
+        """
+        system_prompt = (
+            "You are an expert Blender technical artist. Break down the user's request into 3-5 distinct, "
+            "search-friendly technical steps or concepts needed to implement this material. "
+            "Return ONLY a valid JSON list of strings. "
+            "Example: [\"Voronoi Texture distance\", \"Bump node height\", \"ColorRamp inputs\"]"
+        )
+        
+        prompt = f"{system_prompt}\n\nUser Request: {user_input}"
+        
+        if self.provider == "gemini":
+            response = self.chat_session.send_message(prompt)
+            text = response.text
+        elif self.provider == "openai":
+            completion = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            text = completion.choices[0].message.content
+        else:
+            raise ValueError(f"Provider {self.provider} not supported for planning")
+
+        # Parse JSON
+        try:
+            # Clean up potential markdown code blocks
+            clean_text = text.replace("```json", "").replace("```", "").strip()
+            plan = json.loads(clean_text)
+            if isinstance(plan, list):
+                return plan
+            return [user_input] # Fallback
+        except Exception as e:
+            print(f"Error parsing plan: {e}")
+            return [user_input] # Fallback
+
+
     def send_tool_result(self, tool_name, result, tool_call_id=None):
         """
         Sends the result of a tool execution back to the LLM.

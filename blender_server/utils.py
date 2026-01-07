@@ -1,6 +1,12 @@
 import bpy
 import os
 
+def delete_default_cube():
+    """Deletes the default Cube object if it exists."""
+    cube = bpy.data.objects.get("Cube")
+    if cube:
+        bpy.data.objects.remove(cube, do_unlink=True)
+
 def create_procedural_material(name: str, python_code: str):
     """
     Creates or overwrites a material with the given name and executes the python_code
@@ -8,6 +14,8 @@ def create_procedural_material(name: str, python_code: str):
     """
     # Execution environment
     local_vars = {}
+    
+    delete_default_cube()
     
     try:
         # We wrap the code to ensure it runs
